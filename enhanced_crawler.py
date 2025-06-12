@@ -488,7 +488,7 @@ class EnhancedCrawler:
                         readable_title = ' '.join([part.replace('-', ' ').replace('_', ' ').title() 
                                                  for part in path_parts if part and part != 'index.html'])
                         self.url_data[url] = readable_title if readable_title else "Sayfa başlığı"
-                    self.crawled_urls += 1
+                    # Don't increment here - we'll use len(self.visited) for progress
                     
                     # Extract more links from this page
                     new_links = self._extract_all_links(response.text, url)

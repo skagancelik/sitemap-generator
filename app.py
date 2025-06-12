@@ -175,10 +175,10 @@ def progress(session_id):
         if session_data['completed']:
             percentage = 100
         else:
-            percentage = (crawler.crawled_urls / crawler.total_urls * 100) if crawler.total_urls > 0 else 0
+            percentage = (len(crawler.visited) / crawler.total_urls * 100) if crawler.total_urls > 0 else 0
         
         return jsonify({
-            "crawled_urls": crawler.crawled_urls,
+            "crawled_urls": len(crawler.visited),
             "total_urls": crawler.total_urls,
             "visited_urls": list(crawler.visited),
             "completed": session_data['completed'],
