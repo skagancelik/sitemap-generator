@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: sitemap-generator
+    env: python
+    buildCommand: "pip install poetry && poetry config virtualenvs.create false && poetry install --only main"
+    startCommand: "gunicorn --bind 0.0.0.0:$PORT --workers 1 --timeout 300 --memory-limit 512 app:app"
+    plan: free
+    healthCheckPath: /
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: FLASK_APP
+        value: app.py
+      - key: PYTHONUNBUFFERED
+        value: "1"

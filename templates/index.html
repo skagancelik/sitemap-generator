@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sitemap Generator</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>Sitemap Generator</h1>
+        <p class="subtitle">Otomatik olarak web sitelerinden XML sitemap dosyası oluşturun</p>
+        <form id="crawlForm">
+            <div class="form-row">
+                <input type="text" id="urlInput" placeholder="Web sitesi URL'sini girin (örn: https://example.com)" required>
+                <button type="submit" id="submitBtn">Sitemap Oluştur</button>
+            </div>
+        </form>
+        <div id="resultsContainer">
+            <div id="progress"></div>
+            <div id="urlList"></div>
+            <div class="download-buttons">
+                <button id="downloadBtn">XML Sitemap İndir</button>
+                <button id="csvBtn">CSV Liste İndir</button>
+            </div>
+        </div>
+    </div>
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html>
