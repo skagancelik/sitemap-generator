@@ -91,65 +91,102 @@ class EnhancedCrawler:
         # Phase 2: Discover URL patterns from homepage
         self._discover_url_patterns()
         
-        # Phase 3: Sitemap discovery for all domains
+        # Phase 3: Comprehensive sitemap discovery (prioritized for blog content)
         self._comprehensive_sitemap_discovery()
         
-        # Phase 4: Pattern-based URL generation
+        # Phase 4: Blog and content-specific discovery
+        self._discover_blog_content()
+        
+        # Phase 5: Pattern-based URL generation
         self._generate_pattern_urls()
         
-        # Phase 5: Deep content crawling
+        # Phase 6: Deep content crawling with recursive link following
         self._deep_content_crawl()
         
         logger.info(f"Enhanced crawling completed. Found {len(self.visited)} URLs across {len(self.allowed_subdomains)} domains")
         
     def _discover_subdomains(self):
-        """Discover subdomains for the main domain"""
+        """Discover subdomains dynamically from DNS records and page content"""
         logger.info(f"Discovering subdomains for {self.base_domain}")
         
-        # Common subdomain patterns to check
-        common_subdomains = [
-            'www', 'blog', 'api', 'app', 'admin', 'docs', 'support', 'help',
-            'mail', 'email', 'cdn', 'static', 'assets', 'img', 'images',
-            'dev', 'staging', 'test', 'demo', 'beta', 'alpha',
-            'shop', 'store', 'ecommerce', 'cart', 'checkout',
-            'portal', 'dashboard', 'panel', 'control', 'manage',
-            'news', 'blog', 'articles', 'content', 'media',
-            'learn', 'training', 'education', 'courses', 'academy',
-            'community', 'forum', 'discussion', 'social',
-            'mobile', 'm', 'touch', 'amp', 'lite',
-            'secure', 'ssl', 'safe', 'login', 'auth',
-            'files', 'download', 'uploads', 'storage',
-            'marketing', 'promo', 'campaign', 'landing'
-        ]
+        # Phase 1: Analyze homepage for subdomain references
+        discovered_subdomains_from_content = self._extract_subdomains_from_content()
         
+        # Phase 2: Test common patterns + discovered patterns
+        all_patterns = set()
+        
+        # Basic common patterns (minimal set)
+        basic_patterns = ['www', 'blog', 'api', 'app', 'help', 'support']
+        all_patterns.update(basic_patterns)
+        
+        # Add patterns discovered from content
+        all_patterns.update(discovered_subdomains_from_content)
+        
+        # Phase 3: Test discovered patterns
         discovered_count = 0
-        # Test only the most common subdomains first
-        priority_subdomains = ['www', 'blog', 'api', 'app', 'help', 'support', 'docs']
-        
-        for subdomain in priority_subdomains:
-            if discovered_count >= 3:  # Reduced limit
+        for subdomain in all_patterns:
+            if discovered_count >= 10:  # Increased limit for better coverage
                 break
                 
             test_domain = f"{subdomain}.{self.base_domain}"
             test_url = f"https://{test_domain}"
             
             try:
-                # Quick check if subdomain exists with shorter timeout
                 response = self.session.head(test_url, timeout=2, allow_redirects=True)
-                if response.status_code in [200, 301, 302, 403]:  # Valid responses
+                if response.status_code in [200, 301, 302, 403]:
                     if test_domain not in self.allowed_subdomains:
                         self.allowed_subdomains.add(test_domain)
                         self.discovered_subdomains.add(test_domain)
-                        # Add subdomain homepage to visit queue
                         self.visited.add(test_url)
                         discovered_count += 1
                         logger.info(f"Found subdomain: {test_domain}")
                         
             except (requests.exceptions.Timeout, requests.exceptions.RequestException):
-                # Skip slow or unreachable subdomains quickly
                 continue
                 
         logger.info(f"Discovered {len(self.discovered_subdomains)} subdomains")
+    
+    def _extract_subdomains_from_content(self):
+        """Extract potential subdomains from website content"""
+        discovered_patterns = set()
+        
+        try:
+            # Analyze main domain homepage
+            response = self.session.get(self.start_url, timeout=3)
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.text, 'html.parser')
+                
+                # Extract from all links
+                for link in soup.find_all('a', href=True):
+                    href = link['href']
+                    if isinstance(href, str) and self.base_domain in href:
+                        parsed = urlparse(href)
+                        if parsed.netloc and parsed.netloc != self.domain:
+                            # Extract subdomain part
+                            if parsed.netloc.endswith(self.base_domain):
+                                subdomain = parsed.netloc.replace('.' + self.base_domain, '')
+                                if subdomain and '.' not in subdomain:  # Simple subdomain
+                                    discovered_patterns.add(subdomain)
+                
+                # Extract from JavaScript and data attributes
+                scripts = soup.find_all('script')
+                for script in scripts:
+                    script_text = script.get_text()
+                    if script_text:
+                        import re
+                        # Find subdomain patterns in JS
+                        pattern = rf'([a-zA-Z0-9\-]+)\.{re.escape(self.base_domain)}'
+                        matches = re.findall(pattern, script_text)
+                        for match in matches:
+                            if len(match) > 1 and len(match) < 20:  # Reasonable subdomain length
+                                discovered_patterns.add(match)
+                
+                logger.info(f"Discovered {len(discovered_patterns)} subdomain patterns from content")
+                                
+        except Exception as e:
+            logger.info(f"Could not analyze content for subdomains: {e}")
+            
+        return discovered_patterns
         
     def _discover_url_patterns(self):
         """Analyze homepage and subdomain pages to discover URL patterns with timeout protection"""
@@ -218,6 +255,164 @@ class EnhancedCrawler:
             logger.warning(f"Could not analyze domains for patterns: {e}")
             # Continue without patterns - the system will still work with sitemap and generated patterns
             pass
+    
+    def _discover_blog_content(self):
+        """Aggressively discover blog posts and articles"""
+        logger.info("Starting aggressive blog content discovery")
+        
+        blog_discovered = 0
+        
+        # Blog-specific paths to check on all domains
+        blog_paths = [
+            '/blog/', '/blog', '/articles/', '/articles', '/news/', '/news',
+            '/posts/', '/posts', '/content/', '/content', '/insights/', '/insights',
+            '/resources/', '/resources', '/stories/', '/stories', '/updates/', '/updates',
+            '/press/', '/press', '/media/', '/media', '/events/', '/events',
+            '/announcements/', '/announcements', '/tutorials/', '/tutorials',
+            '/guides/', '/guides', '/tips/', '/tips', '/learn/', '/learn'
+        ]
+        
+        for domain_url in [f"https://{domain}" for domain in self.allowed_subdomains]:
+            if blog_discovered >= 1000:  # Limit blog discovery
+                break
+                
+            for blog_path in blog_paths:
+                if blog_discovered >= 1000:
+                    break
+                    
+                blog_url = urljoin(domain_url, blog_path)
+                if blog_url in self.visited:
+                    continue
+                    
+                try:
+                    response = self.session.get(blog_url, timeout=3, allow_redirects=True)
+                    if response.status_code == 200:
+                        self.visited.add(blog_url)
+                        blog_discovered += 1
+                        
+                        # Extract blog post links from this page
+                        soup = BeautifulSoup(response.text, 'html.parser')
+                        
+                        # Look for blog post patterns
+                        blog_selectors = [
+                            'a[href*="/blog/"]', 'a[href*="/article/"]', 'a[href*="/post/"]',
+                            'a[href*="/news/"]', 'a[href*="/story/"]', 'a[href*="/insight/"]',
+                            '.blog-post a', '.article a', '.post a', '.news-item a',
+                            '.content-item a', '.story a', '.resource a'
+                        ]
+                        
+                        for selector in blog_selectors:
+                            links = soup.select(selector)
+                            for link in links[:50]:  # Limit per selector
+                                href = link.get('href')
+                                if href:
+                                    full_url = urljoin(blog_url, href)
+                                    if (self._is_valid_url(full_url) and 
+                                        full_url not in self.visited and 
+                                        len(self.visited) < self.max_urls):
+                                        self.visited.add(full_url)
+                                        blog_discovered += 1
+                        
+                        # Check for pagination on blog pages
+                        pagination_selectors = [
+                            'a[href*="page"]', 'a[href*="Page"]', '.pagination a',
+                            '.pager a', '.next a', '.prev a', 'a[rel="next"]'
+                        ]
+                        
+                        for selector in pagination_selectors:
+                            pages = soup.select(selector)
+                            for page_link in pages[:10]:  # Limit pagination
+                                href = page_link.get('href')
+                                if href:
+                                    page_url = urljoin(blog_url, href)
+                                    if (self._is_valid_url(page_url) and 
+                                        page_url not in self.visited and 
+                                        len(self.visited) < self.max_urls):
+                                        self.visited.add(page_url)
+                                        blog_discovered += 1
+                        
+                except (requests.exceptions.Timeout, requests.exceptions.RequestException):
+                    continue
+                except Exception as e:
+                    continue
+        
+        logger.info(f"Blog discovery completed. Found {blog_discovered} blog-related URLs")
+    
+    def _comprehensive_link_extraction(self, html, base_url):
+        """Extract ALL internal links from a page for comprehensive crawling"""
+        links = set()
+        
+        try:
+            soup = BeautifulSoup(html, 'html.parser')
+            
+            # Extract all anchor tags with href
+            for link_tag in soup.find_all('a', href=True):
+                href = link_tag['href']
+                if href:
+                    # Convert relative URLs to absolute
+                    if href.startswith('/'):
+                        full_url = urljoin(base_url, href)
+                    elif href.startswith('http'):
+                        full_url = href
+                    elif not href.startswith(('mailto:', 'tel:', '#', 'javascript:')):
+                        full_url = urljoin(base_url, href)
+                    else:
+                        continue
+                    
+                    # Only include URLs from same domain or allowed subdomains
+                    parsed_url = urlparse(full_url)
+                    if parsed_url.netloc in self.allowed_subdomains:
+                        # Clean URL (remove fragments, normalize)
+                        clean_url = f"{parsed_url.scheme}://{parsed_url.netloc}{parsed_url.path}"
+                        if parsed_url.query:
+                            clean_url += f"?{parsed_url.query}"
+                        links.add(clean_url)
+            
+            # Extract links from JavaScript onclick events and data attributes
+            for element in soup.find_all(attrs={'onclick': True}):
+                onclick = element.get('onclick', '')
+                if 'location' in onclick or 'href' in onclick:
+                    # Extract URLs from JavaScript
+                    import re
+                    url_matches = re.findall(r'["\']([^"\']*)["\']', onclick)
+                    for match in url_matches:
+                        if match.startswith('/') or self.domain in match:
+                            try:
+                                full_url = urljoin(base_url, match)
+                                parsed_url = urlparse(full_url)
+                                if parsed_url.netloc in self.allowed_subdomains:
+                                    links.add(full_url)
+                            except:
+                                continue
+            
+            # Extract from data-href and similar attributes
+            for element in soup.find_all(attrs={'data-href': True}):
+                data_href = element.get('data-href')
+                if data_href:
+                    try:
+                        full_url = urljoin(base_url, data_href)
+                        parsed_url = urlparse(full_url)
+                        if parsed_url.netloc in self.allowed_subdomains:
+                            links.add(full_url)
+                    except:
+                        continue
+            
+            # Extract from form actions
+            for form in soup.find_all('form', action=True):
+                action = form['action']
+                if action and not action.startswith(('mailto:', '#')):
+                    try:
+                        full_url = urljoin(base_url, action)
+                        parsed_url = urlparse(full_url)
+                        if parsed_url.netloc in self.allowed_subdomains:
+                            links.add(full_url)
+                    except:
+                        continue
+                        
+        except Exception as e:
+            logger.warning(f"Error extracting links from {base_url}: {e}")
+        
+        return list(links)
             
     def _analyze_url_pattern(self, url):
         """Extract patterns from URLs for generation"""
@@ -265,19 +460,51 @@ class EnhancedCrawler:
                 # Lightning-fast check - 1 second max per domain
                 start_time = time.time()
                 
-                # Only try sitemap.xml - most common location
-                try:
-                    sitemap_url = urljoin(domain_url, '/sitemap.xml')
-                    response = self.session.get(sitemap_url, timeout=0.8)
-                    if response.status_code == 200:
-                        root = ET.fromstring(response.content)
-                        for url_elem in root.findall('.//{http://www.sitemaps.org/schemas/sitemap/0.9}loc'):
-                            if url_elem.text and self._is_valid_url(url_elem.text):
-                                self.visited.add(url_elem.text)
-                        logger.info(f"Found sitemap at {sitemap_url} with URLs")
-                except:
-                    # If sitemap.xml fails, skip entirely and move to generation
-                    pass
+                # Try multiple sitemap locations for comprehensive blog content discovery
+                sitemap_paths = ['/sitemap.xml', '/sitemap_index.xml', '/wp-sitemap.xml', '/post-sitemap.xml']
+                
+                for sitemap_path in sitemap_paths:
+                    try:
+                        sitemap_url = urljoin(domain_url, sitemap_path)
+                        response = self.session.get(sitemap_url, timeout=1.5)
+                        if response.status_code == 200:
+                            try:
+                                root = ET.fromstring(response.content)
+                                sitemap_urls = 0
+                                
+                                # Extract all URLs from sitemap
+                                for url_elem in root.findall('.//{http://www.sitemaps.org/schemas/sitemap/0.9}loc'):
+                                    if url_elem.text and self._is_valid_url(url_elem.text):
+                                        self.visited.add(url_elem.text)
+                                        sitemap_urls += 1
+                                
+                                # Handle sitemap index files
+                                for sitemap_elem in root.findall('.//{http://www.sitemaps.org/schemas/sitemap/0.9}sitemap'):
+                                    loc_elem = sitemap_elem.find('.//{http://www.sitemaps.org/schemas/sitemap/0.9}loc')
+                                    if loc_elem is not None and loc_elem.text:
+                                        try:
+                                            sub_response = self.session.get(loc_elem.text, timeout=1.2)
+                                            if sub_response.status_code == 200:
+                                                sub_root = ET.fromstring(sub_response.content)
+                                                for sub_url in sub_root.findall('.//{http://www.sitemaps.org/schemas/sitemap/0.9}loc'):
+                                                    if sub_url.text and self._is_valid_url(sub_url.text):
+                                                        self.visited.add(sub_url.text)
+                                                        sitemap_urls += 1
+                                        except:
+                                            continue
+                                
+                                if sitemap_urls > 0:
+                                    logger.info(f"Extracted {sitemap_urls} URLs from {sitemap_url}")
+                                    
+                            except ET.ParseError:
+                                # Try text-based parsing for non-XML sitemaps
+                                for line in response.text.split('\n'):
+                                    line = line.strip()
+                                    if line.startswith('http') and self._is_valid_url(line):
+                                        self.visited.add(line)
+                                        
+                    except:
+                        continue
                 
                 elapsed = time.time() - start_time
                 logger.info(f"Completed fast sitemap check for {domain_url} in {elapsed:.1f}s")
@@ -342,22 +569,19 @@ class EnhancedCrawler:
             if subdomain_url not in domains_to_generate:
                 domains_to_generate.append(subdomain_url)
         
-        # Common website sections and paths for B2B platforms
-        common_paths = [
-            '/blog', '/blog/', '/news', '/news/', '/resources', '/resources/',
-            '/case-studies', '/case-studies/', '/customers', '/customers/',
-            '/solutions', '/solutions/', '/products', '/products/', '/features', '/features/',
-            '/pricing', '/pricing/', '/about', '/about/', '/contact', '/contact/',
-            '/support', '/support/', '/help', '/help/', '/docs', '/docs/',
-            '/webinars', '/webinars/', '/events', '/events/', '/careers', '/careers/',
-            '/partners', '/partners/', '/integrations', '/integrations/',
-            '/templates', '/templates/', '/guides', '/guides/', '/whitepapers', '/whitepapers/',
-            '/ebooks', '/ebooks/', '/demos', '/demos/', '/trials', '/trials/',
-            '/login', '/signup', '/register', '/download', '/downloads',
-            '/api', '/developers', '/security', '/privacy', '/terms',
-            '/company', '/team', '/leadership', '/investors', '/press',
-            '/success-stories', '/testimonials', '/reviews', '/awards'
+        # Phase 1: Discover paths dynamically from homepage and sitemaps
+        discovered_paths = self._extract_paths_from_content()
+        
+        # Phase 2: Combine with minimal common paths
+        basic_paths = [
+            '/blog', '/news', '/resources', '/about', '/contact', '/support', 
+            '/help', '/docs', '/pricing', '/products', '/solutions'
         ]
+        
+        # Merge discovered and basic paths
+        all_paths = set(basic_paths + list(discovered_paths))
+        
+        logger.info(f"Using {len(all_paths)} discovered paths for generation")
         
         # Generate URLs for each domain (main + subdomains)
         for domain_url in domains_to_generate:
@@ -460,7 +684,68 @@ class EnhancedCrawler:
                     if len(self.visited) >= self.max_urls:
                         break
                             
-        logger.info(f"Generated {generated_count} URLs from patterns and common paths")
+        logger.info(f"Generated {generated_count} URLs from patterns and discovered paths")
+    
+    def _extract_paths_from_content(self):
+        """Extract all unique paths from homepage and initial crawl"""
+        discovered_paths = set()
+        
+        # Analyze all discovered domains
+        domains_to_analyze = [self.start_url]
+        for subdomain in self.discovered_subdomains:
+            domains_to_analyze.append(f"https://{subdomain}")
+        
+        for domain_url in domains_to_analyze:
+            try:
+                response = self.session.get(domain_url, timeout=3)
+                if response.status_code == 200:
+                    soup = BeautifulSoup(response.text, 'html.parser')
+                    
+                    # Extract all internal links and their paths
+                    for link in soup.find_all('a', href=True):
+                        href = link['href']
+                        if href.startswith('/') and len(href) > 1:
+                            # Clean path - remove query params and fragments
+                            clean_path = href.split('?')[0].split('#')[0]
+                            if len(clean_path) > 1 and len(clean_path) < 100:
+                                # Extract directory paths
+                                parts = clean_path.strip('/').split('/')
+                                if parts and parts[0]:
+                                    base_path = '/' + parts[0]
+                                    discovered_paths.add(base_path)
+                                    discovered_paths.add(base_path + '/')
+                    
+                    # Extract from navigation menus specifically
+                    nav_elements = soup.find_all(['nav', 'header', 'footer'])
+                    for nav in nav_elements:
+                        nav_links = nav.find_all('a', href=True)
+                        for link in nav_links:
+                            href = link['href']
+                            if href.startswith('/') and len(href) > 1:
+                                clean_path = href.split('?')[0].split('#')[0]
+                                if len(clean_path) > 1:
+                                    parts = clean_path.strip('/').split('/')
+                                    if parts and parts[0]:
+                                        base_path = '/' + parts[0]
+                                        discovered_paths.add(base_path)
+                                        discovered_paths.add(base_path + '/')
+                                        
+            except Exception as e:
+                logger.debug(f"Error analyzing {domain_url} for paths: {e}")
+                continue
+        
+        # Filter out very common/generic paths that might be noise
+        filtered_paths = set()
+        for path in discovered_paths:
+            path_clean = path.strip('/')
+            # Skip very short or potentially problematic paths
+            if (len(path_clean) >= 2 and 
+                not path_clean.isdigit() and 
+                path_clean not in ['js', 'css', 'img', 'images', 'assets', 'static']):
+                filtered_paths.add(path)
+        
+        logger.info(f"Discovered {len(filtered_paths)} unique paths from content analysis")
+        return list(filtered_paths)
         
     def _deep_content_crawl(self):
         """Lightning-fast instant completion mode"""
@@ -490,15 +775,30 @@ class EnhancedCrawler:
                         self.url_data[url] = readable_title if readable_title else "Sayfa başlığı"
                     # Don't increment here - we'll use len(self.visited) for progress
                     
-                    # Extract more links from this page
-                    new_links = self._extract_all_links(response.text, url)
+                    # Extract ALL internal links from this page
+                    new_links = self._comprehensive_link_extraction(response.text, url)
                     
-                    # Add all discovered links
+                    # Add all discovered links with more aggressive crawling
                     for link in new_links:
                         if len(self.visited) >= self.max_urls:
                             break
                         if link not in self.visited and self._is_valid_url(link):
                             self.visited.add(link)
+                            
+                            # Immediately crawl high-priority links (blog posts, articles)
+                            if any(pattern in link.lower() for pattern in ['/blog/', '/article/', '/post/', '/news/', '/story/']):
+                                try:
+                                    quick_response = self.session.get(link, timeout=1.5, allow_redirects=True)
+                                    if quick_response.status_code == 200:
+                                        # Extract more links from this blog/article page
+                                        deeper_links = self._comprehensive_link_extraction(quick_response.text, link)
+                                        for deep_link in deeper_links[:20]:  # Limit to prevent explosion
+                                            if (deep_link not in self.visited and 
+                                                self._is_valid_url(deep_link) and 
+                                                len(self.visited) < self.max_urls):
+                                                self.visited.add(deep_link)
+                                except:
+                                    continue
                             
                     # For every 10 URLs, report progress
                     if i % 10 == 0 and i > 0:

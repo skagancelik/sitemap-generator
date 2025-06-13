@@ -94,9 +94,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 setTimeout(updateProgress, 1000);
             } else {
                 if (data.visited_urls && data.visited_urls.length > 0) {
-                    progressDiv.innerHTML = `Tamamlandı! ${data.crawled_urls} URL bulundu`;
+                    progressDiv.innerHTML = `Tamamlandı! ${data.crawled_urls} URL bulundu - CSV indiriliyor...`;
                     downloadBtn.style.display = 'block';
                     csvBtn.style.display = 'block';
+                    
+                    // Otomatik CSV indirme başlat
+                    setTimeout(() => {
+                        if (currentSessionId) {
+                            window.location.href = `/download-csv/${currentSessionId}`;
+                            progressDiv.innerHTML = `Tamamlandı! ${data.crawled_urls} URL bulundu - CSV indirildi`;
+                        }
+                    }, 1000);
                 } else {
                     progressDiv.innerHTML = `Uyarı: Taranacak URL bulunamadı`;
                 }
